@@ -1,5 +1,8 @@
-# Libraries - fetched by CurseForge packager
-Libs/
+# Libraries are fetched by the release packager.
+libs/
+
+# Locally assembled release archives
+dist/
 
 # OS files
 .DS_Store

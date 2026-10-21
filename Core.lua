@@ -1,3 +1,8 @@
+-- XPBarNone
+-- Ported to WoW Forever in 2026 by OpenAI Codex, with direction, assistance,
+-- and prompting by Rob Freyder. See FOREVER-PORT.md for the changes and their
+-- rationale.
+
 -- Addon
 XPBarNone = LibStub("AceAddon-3.0"):NewAddon("XPBarNone", "AceEvent-3.0", "AceConsole-3.0")
 local XPBarNone = XPBarNone
@@ -6,6 +11,19 @@ local XPBarNone = XPBarNone
 local L = LibStub("AceLocale-3.0"):GetLocale("XPBarNone")
 local LSM3 = LibStub("LibSharedMedia-3.0")
 local LQT = LibStub:GetLibrary("LibQTip-1.0")
+
+-- XPBarNone historically relied on AceGUI-3.0-SharedMediaWidgets exporting
+-- AceGUIWidgetLSMlists as a global. That widget package is not part of Ace3 or
+-- LibSharedMedia and is not shipped by XPBarNone, so the General options page
+-- failed to render when no unrelated addon happened to load it first. Use the
+-- LibSharedMedia API directly and let AceConfig render ordinary dropdowns.
+local function GetMediaChoices(mediaType)
+    local choices = {}
+    for name in pairs(LSM3:HashTable(mediaType)) do
+        choices[name] = name
+    end
+    return choices
+end
 
 -- Doodads
 local _G = _G
@@ -67,27 +85,118 @@ do
     end
 end
 
+-- WoW Forever uses the modern 12.1 UI engine but reports a 160xx interface
+-- number and vanilla game content. WOW_PROJECT_ID is not a reliable flavor
+-- discriminator for this client, so detect it the same way EllesmereUI does.
+local IsForever
+do
+    local interfaceVersion = select(4, GetBuildInfo())
+    local is_forever = type(interfaceVersion) == "number"
+        and interfaceVersion >= 16000 and interfaceVersion < 20000
+
+    IsForever = function()
+        return is_forever
+    end
+end
+
+local function IsRetailContent()
+    return IsRetail() and not IsForever()
+end
+
 -- WoW Functions
-local CollapseFactionHeader = CollapseFactionHeader
-local ExpandFactionHeader = ExpandFactionHeader
+local LegacyCollapseFactionHeader = CollapseFactionHeader
+local LegacyExpandFactionHeader = ExpandFactionHeader
 local GetContainerItemInfo = GetContainerItemInfo
 local GetCurrentCombatTextEventInfo = GetCurrentCombatTextEventInfo
 local GetGuildInfo = GetGuildInfo
 local GetInventoryItemID = GetInventoryItemID
 local GetItemInfo = GetItemInfo
-local GetNumFactions = GetNumFactions
-local GetFactionInfo = GetFactionInfo
-local GetFactionInfoByID = GetFactionInfoByID
+local LegacyGetNumFactions = GetNumFactions
+local LegacyGetFactionInfo = GetFactionInfo
+local LegacyGetFactionInfoByID = GetFactionInfoByID
 local GetMouseButtonClicked = GetMouseButtonClicked
-local GetWatchedFactionInfo = GetWatchedFactionInfo
+local LegacyGetWatchedFactionInfo = GetWatchedFactionInfo
 local GetXPExhaustion = GetXPExhaustion
 local IsControlKeyDown = IsControlKeyDown
 local IsResting = IsResting
 local IsShiftKeyDown = IsShiftKeyDown
-local SetWatchedFactionIndex = SetWatchedFactionIndex
+local LegacySetWatchedFactionIndex = SetWatchedFactionIndex
 local UnitLevel = UnitLevel
 local UnitXP = UnitXP
 local UnitXPMax = UnitXPMax
+
+-- The 12.1 engine used by WoW Forever removed the old global reputation
+-- functions. Keep the rest of XPBarNone on its original tuple-based API and
+-- translate the modern C_Reputation tables at this boundary.
+local C_Rep = C_Reputation
+
+local function FactionDataAsLegacyTuple(data)
+    if not data then return nil end
+    return data.name,
+           data.description,
+           data.reaction,
+           data.currentReactionThreshold,
+           data.nextReactionThreshold,
+           data.currentStanding,
+           data.atWarWith,
+           data.canToggleAtWar,
+           data.isHeader,
+           data.isCollapsed,
+           data.isHeaderWithRep,
+           data.isWatched,
+           data.isChild,
+           data.factionID,
+           data.hasBonusRepGain,
+           data.canBeLFGBonus
+end
+
+local function GetNumFactions()
+    if LegacyGetNumFactions then return LegacyGetNumFactions() end
+    if C_Rep and C_Rep.GetNumFactions then return C_Rep.GetNumFactions() end
+    return 0
+end
+
+local function GetFactionInfo(index)
+    if LegacyGetFactionInfo then return LegacyGetFactionInfo(index) end
+    if C_Rep and C_Rep.GetFactionDataByIndex then
+        return FactionDataAsLegacyTuple(C_Rep.GetFactionDataByIndex(index))
+    end
+end
+
+local function GetFactionInfoByID(factionID)
+    if LegacyGetFactionInfoByID then return LegacyGetFactionInfoByID(factionID) end
+    if C_Rep and C_Rep.GetFactionDataByID then
+        return FactionDataAsLegacyTuple(C_Rep.GetFactionDataByID(factionID))
+    end
+end
+
+local function GetWatchedFactionInfo()
+    if LegacyGetWatchedFactionInfo then return LegacyGetWatchedFactionInfo() end
+    if C_Rep and C_Rep.GetWatchedFactionData then
+        local data = C_Rep.GetWatchedFactionData()
+        if data then
+            return data.name, data.reaction, data.currentReactionThreshold,
+                   data.nextReactionThreshold, data.currentStanding, data.factionID
+        end
+    end
+end
+
+local function SetWatchedFactionIndex(index)
+    if LegacySetWatchedFactionIndex then return LegacySetWatchedFactionIndex(index) end
+    if not (C_Rep and C_Rep.GetFactionDataByIndex and C_Rep.SetWatchedFactionByID) then return end
+    local data = C_Rep.GetFactionDataByIndex(index)
+    if data and data.factionID then C_Rep.SetWatchedFactionByID(data.factionID) end
+end
+
+local function CollapseFactionHeader(index)
+    if LegacyCollapseFactionHeader then return LegacyCollapseFactionHeader(index) end
+    if C_Rep and C_Rep.CollapseFactionHeader then return C_Rep.CollapseFactionHeader(index) end
+end
+
+local function ExpandFactionHeader(index)
+    if LegacyExpandFactionHeader then return LegacyExpandFactionHeader(index) end
+    if C_Rep and C_Rep.ExpandFactionHeader then return C_Rep.ExpandFactionHeader(index) end
+end
 
 -- Some functions don't exist outside of Retail. We set these conditionally
 -- depending on which client we're running on.
@@ -110,10 +219,10 @@ do
     local MAX_PLAYER_LEVEL_TABLE = MAX_PLAYER_LEVEL_TABLE
 
     -- If we're outside of Retail, set these
-    if not IsRetail() then
+    if not IsRetailContent() then
         -- BreakUpLargeNumbers in Classic doesn't do anything. Implement it
         -- ourselves.
-        local LARGE_NUMBER_SEPERATOR = LARGE_NUMBER_SEPERATOR
+        local LARGE_NUMBER_SEPERATOR = LARGE_NUMBER_SEPERATOR or LARGE_NUMBER_SEPARATOR or ","
 
         BreakUpLargeNumbers = function(num)
             local str = ""
@@ -166,7 +275,13 @@ do
         end
     end
 
-    if IsClassic() then
+    if IsForever() then
+        -- Prefer the engine's max-level helper so this survives future cap
+        -- changes; 60 is the vanilla-content fallback.
+        GetMaxLevelForPlayerExpansion = _G.GetMaxLevelForPlayerExpansion
+            or _G.GetMaxPlayerLevel
+            or function() return 60 end
+    elseif IsClassic() then
         local maxLevel = MAX_PLAYER_LEVEL_TABLE[LE_EXPANSION_CLASSIC]
 
         -- This function doesn't exist in Classic.
@@ -186,7 +301,7 @@ do
         GetMaxLevelForPlayerExpansion = function()
             return maxLevel
         end
-    else
+    elseif IsRetailContent() then
         -- Retail
         BreakUpLargeNumbers = _G.BreakUpLargeNumbers
         FindActiveAzeriteItem = C_AzeriteItem.FindActiveAzeriteItem
@@ -221,6 +336,12 @@ do
                    repInfo.reactionThreshold,   -- friendThresh
                    repInfo.nextThreshold        -- friendThreshNext
         end
+    else
+        -- Unknown Classic-like flavors should still produce an XP bar rather
+        -- than failing during file load.
+        GetMaxLevelForPlayerExpansion = _G.GetMaxLevelForPlayerExpansion
+            or _G.GetMaxPlayerLevel
+            or function() return 60 end
     end
 end
 
@@ -266,6 +387,7 @@ LSM3:Register("statusbar", "Smooth", "Interface\\AddOns\\XPBarNone\\Textures\\sm
 LSM3:Register("statusbar", "Smooth v2", "Interface\\AddOns\\XPBarNone\\Textures\\smoothv2")
 LSM3:Register("statusbar", "Striped", "Interface\\AddOns\\XPBarNone\\Textures\\striped")
 LSM3:Register("statusbar", "Waves", "Interface\\AddOns\\XPBarNone\\Textures\\waves")
+LSM3:Register("font", "Prototype", "Interface\\AddOns\\XPBarNone\\Fonts\\Prototype.ttf")
 
 -- SavedVariables stored here later
 local db
@@ -303,14 +425,14 @@ local defaults = {
             dynamicbars = false,
             mouseover = false,
             locked = false,
-            bubbles = false,
+            bubbles = true,
             clamptoscreen = true,
             commify = false,
             textposition = 50,
         },
         -- XP Bar specific
         xp = {
-            xpstring = "Exp: [curXP]/[maxXP] ([restPC]) :: [curPC] through level [pLVL] :: [needXP] XP left :: [KTL] kills to level",
+            xpstring = "Level [pLVL]   XP=[curXP]/[maxXP]     Rest=[restXP]/[restPC]         [curPC] to lvl [nLVL]        [needXP] XP to Ding!",
             indicaterest = true,
             showremaining = true,
             showzerorest = true,
@@ -507,8 +629,7 @@ local function GetOptions(uiTypes, uiName, appName)
                     desc = L["Set the bar texture."],
                     type = "select",
                     order = 1400,
-                    dialogControl = 'LSM30_Statusbar',
-                    values = AceGUIWidgetLSMlists.statusbar,
+                    values = function() return GetMediaChoices("statusbar") end,
                     style = "dropdown",
                     set = function(info, value)
                         db.general.texture = value
@@ -521,8 +642,7 @@ local function GetOptions(uiTypes, uiName, appName)
                     desc = L["Set the font."],
                     type = "select",
                     order = 1450,
-                    dialogControl = 'LSM30_Font',
-                    values = AceGUIWidgetLSMlists.font,
+                    values = function() return GetMediaChoices("font") end,
                     style = "dropdown",
                     set = function(info, value)
                         db.general.font = value
@@ -637,7 +757,7 @@ local function GetOptions(uiTypes, uiName, appName)
         }
 
         -- Only show guild rep tracking toggle in Retail
-        if IsRetail() then
+        if IsRetailContent() then
             options.args.autotrackguild = {
                 name = L["Auto Track Guild Reputation"],
                 desc = L["Automatically track your guild reputation increases."],
@@ -769,7 +889,7 @@ local function GetOptions(uiTypes, uiName, appName)
         }
 
         -- Only show the Azerite Bar colour options in Retail
-        if IsRetail() then
+        if IsRetailContent() then
             options.args.azerite = {
                 name = L["Azerite Bar"],
                 desc = L["Set the colour of the Azerite Power bar."],
@@ -949,20 +1069,23 @@ function XPBarNone:OnInitialize()
 
     ACRegistry:RegisterOptionsTable("XPBarNone-Colours", GetOptions)
     ACRegistry:RegisterOptionsTable("XPBarNone-RepMenu", GetOptions)
-    ACDialog:AddToBlizOptions("XPBarNone-General", myName)
+    local _, optionsCategoryID = ACDialog:AddToBlizOptions("XPBarNone-General", myName)
+    self.optionsCategoryID = optionsCategoryID
     ACDialog:AddToBlizOptions("XPBarNone-XP", L["XP Bar"], myName)
     ACDialog:AddToBlizOptions("XPBarNone-Rep", L["Reputation Bar"], myName)
     ACDialog:AddToBlizOptions("XPBarNone-Colours", L["Bar Colours"], myName)
     ACDialog:AddToBlizOptions("XPBarNone-RepMenu", L["Reputation Menu"], myName)
 
     -- No Azerite Item outside of retail, hide the options
-    if IsRetail() then
+    if IsRetailContent() then
         ACRegistry:RegisterOptionsTable("XPBarNone-Azer", GetOptions)
         ACDialog:AddToBlizOptions("XPBarNone-Azer", L["Azerite Bar"], myName)
     end
 
     -- Register a chat command to open options
-    self:RegisterChatCommand("xpbn", function() Settings.OpenToCategory(myName) end)
+    self:RegisterChatCommand("xpbn", function()
+        Settings.OpenToCategory(self.optionsCategoryID or myName)
+    end)
 
     -- Profiles
     local popts = LibStub("AceDBOptions-3.0"):GetOptionsTable(self.db)
@@ -982,7 +1105,7 @@ function XPBarNone:OnEnable()
     end
 
     -- Some events don't exist outside of Retail
-    if IsRetail() then
+    if IsRetailContent() then
         -- Azerite Power Event
         self:RegisterEvent("AZERITE_ITEM_EXPERIENCE_CHANGED", "UpdateXPBar")
 
@@ -1341,9 +1464,8 @@ function XPBarNone:CreateXPBar()
 
         -- Display options on Shift-RightClick
         if IsShiftKeyDown() and button == "RightButton" then
-            Settings.OpenToCategory(
-                C_AddOns.GetAddOnMetadata("XPBarNone", "Title")
-            )
+            Settings.OpenToCategory(self.optionsCategoryID
+                or C_AddOns.GetAddOnMetadata("XPBarNone", "Title"))
         end
 
         -- Display Reputation menu on Ctrl-RightClick
