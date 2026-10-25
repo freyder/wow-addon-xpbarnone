@@ -1,9 +1,8 @@
 package-as: XPBarNone
 
 ignore:
+  - README.md
   - .gitignore
-  - .github
-  - tools
 
 externals:
   libs/LibStub: https://repos.curseforge.com/wow/libstub/trunk

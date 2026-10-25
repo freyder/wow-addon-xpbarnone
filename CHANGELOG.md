@@ -1,22 +1,16 @@
 # XPBarNone
 
-## 100002-8-forever.1 (2026-10-21)
+## Unreleased
 
-Initial WoW Forever compatibility release.
+### Added
+- WoW Forever support (interface 16001), contributed by Rob Freyder (@freyder)
+  - Reputation functions emulated on top of `C_Reputation`
+  - Retail-only features (Azerite, guild rep, paragon, renown) stay disabled
 
-- Target Forever interface 16001 and distinguish its modern engine from its
-  vanilla-content ruleset.
-- Adapt the removed legacy reputation functions to `C_Reputation` while
-  retaining XPBarNone's internal tuple-based behavior.
-- Keep Retail-only Azerite and modern reputation systems disabled on Forever.
-- Use the current Settings category ID for `/xpbn` and Shift-right-click.
-- Replace the undeclared `AceGUIWidgetLSMlists` dependency with direct
-  LibSharedMedia font and status-bar choices.
-- Update the bundled AceGUI checkbox widget from version 26 to version 27 for
-  the modern `Texture:SetDesaturated` API.
-- Add the separately licensed Prototype font as an optional font selection.
-- Seed fresh profiles with the recovered TBC-style XP text and bubble markers.
-- Preserve the original `XPBarNoneDB` saved-variable name and profile format.
+### Fixed
+- Texture and font dropdowns no longer depend on AceGUI-3.0-SharedMediaWidgets
+  being loaded by another addon
+- `/xpbn` and Shift-Right-Click open the options via the settings category ID
 
 ## [100002-1](https://github.com/phyber/XPBarNone/tree/100002-1) (2022-12-03)
 [Full Changelog](https://github.com/phyber/XPBarNone/commits/100002-1) [Previous Releases](https://github.com/phyber/XPBarNone/releases)

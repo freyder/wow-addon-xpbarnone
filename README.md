@@ -1,55 +1,4 @@
-# XPBarNone Forever
-
-XPBarNone Forever is a compatibility port of XPBarNone for World of Warcraft:
-Forever. It supplies a compact, configurable experience and reputation bar
-while retaining the behavior and saved-variable format of the upstream addon.
-
-This port targets Forever interface `16001`, whose vanilla game content runs
-on Blizzard's modern 12.1 UI engine. That combination requires compatibility
-work beyond simply changing the interface number.
-
-## Installation
-
-Extract the release archive into:
-
-`World of Warcraft/_classic_beta_/Interface/AddOns/`
-
-The installed directory must be named `XPBarNone`. Configure the addon with
-`/xpbn`, or Shift-right-click its bar. Existing `XPBarNoneDB` profiles remain
-compatible.
-
-## Forever compatibility
-
-The port:
-
-- detects Forever separately from Retail and the older Classic clients;
-- translates removed legacy reputation APIs to `C_Reputation`;
-- avoids Retail-only Azerite, paragon, major-faction, and friendship paths;
-- opens configuration through the modern Settings category API;
-- repairs the General page for current Ace3 and Blizzard checkbox APIs; and
-- includes the Prototype font as an optional LibSharedMedia selection.
-
-No new XP or reputation tracking system was added. The underlying XPBarNone
-behavior remains upstream's; most changes are compatibility adapters. Fresh
-profiles do use the tested TBC-style XP text and enable ten bubble markers by
-default. Both are ordinary settings and can be changed in `/xpbn`.
-
-Technical details and the reasoning for every change are in
-[FOREVER-PORT.md](FOREVER-PORT.md).
-
-## Credits and license
-
-- Original XPBarNone author: phyber
-- Upstream maintainer: Michael Malura
-- WoW Forever port: OpenAI Codex
-- Direction, assistance, and prompting: Rob Freyder
-
-XPBarNone and this derivative are distributed under the Apache License 2.0;
-see [LICENSE](LICENSE) and [NOTICE](NOTICE). The bundled Prototype font was
-created by Justin Callaghan and has separate redistribution terms in
-`Fonts/Prototype.txt`.
-
-## Upstream project and feature reference
+# XPBarNone
 
 <!-- links:start -->
 [![Support me on Ko-fi](https://malura.de/assets/badge/kofi.svg)](https://malura.de/go/kofi?ref=wow-addon-xpbarnone)
@@ -63,12 +12,11 @@ settings.
 
 ## Experience Bar
 
-The Forever port's default string used to create the XP Bar is:
-`Level [pLVL]   XP=[curXP]/[maxXP]     Rest=[restXP]/[restPC]         [curPC] to lvl [nLVL]        [needXP] XP to Ding!`
+The default string used to create the XP Bar is:
+`Exp: [curXP]/[maxXP] ([restPC]) :: [curPC] through level [pLVL] :: [needXP] XP left :: [KTL] kills to level`
 
-This can be replaced with any combination of the tokens below. The upstream
-default, for example, includes `[KTL]`; that estimate can be inaccurate after
-quest or exploration XP, so the Forever default omits it.
+This would be displayed as something like the following:
+`Exp: 10000/20000 (15.2%) :: 50.0% through level 27 :: 10000 XP left :: 4 kills to level`
 
 The available replacements are:
 

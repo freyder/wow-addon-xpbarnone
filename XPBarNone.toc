@@ -1,12 +1,10 @@
-## Interface: 16001
-## Title: |cFF00D1FFMM|r XPBarNone |cffaaaaaa(Forever)|r
+## Interface: 20505, 16001
+## Title: |cFF00D1FFMM|r XPBarNone
 ## Author: phyber
 ## X-Updated-By: Michael Malura
-## X-Forever-Port-By: OpenAI Codex
-## X-Forever-Port-Direction: Rob Freyder
-## X-Upstream: https://github.com/maluramichael/wow-addon-xpbarnone
-## Notes: XP and reputation bar ported for WoW Forever's modern UI engine.
-## Version: 100002-8-forever.1
+## Notes: XP bar using Ace3. Updated for TBC and WoW Forever compatibility.
+## Version: 100002-3
+## X-Curse-Project-ID: 1448488
 ## IconTexture: Interface\Icons\XP_Icon
 ## Category-enUS: Quests & Leveling
 ## Category-deDE: Quests & Aufwertung

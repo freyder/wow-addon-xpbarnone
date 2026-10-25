@@ -1,8 +1,3 @@
--- XPBarNone
--- Ported to WoW Forever in 2026 by OpenAI Codex, with direction, assistance,
--- and prompting by Rob Freyder. See FOREVER-PORT.md for the changes and their
--- rationale.
-
 -- Addon
 XPBarNone = LibStub("AceAddon-3.0"):NewAddon("XPBarNone", "AceEvent-3.0", "AceConsole-3.0")
 local XPBarNone = XPBarNone
@@ -12,22 +7,10 @@ local L = LibStub("AceLocale-3.0"):GetLocale("XPBarNone")
 local LSM3 = LibStub("LibSharedMedia-3.0")
 local LQT = LibStub:GetLibrary("LibQTip-1.0")
 
--- XPBarNone historically relied on AceGUI-3.0-SharedMediaWidgets exporting
--- AceGUIWidgetLSMlists as a global. That widget package is not part of Ace3 or
--- LibSharedMedia and is not shipped by XPBarNone, so the General options page
--- failed to render when no unrelated addon happened to load it first. Use the
--- LibSharedMedia API directly and let AceConfig render ordinary dropdowns.
-local function GetMediaChoices(mediaType)
-    local choices = {}
-    for name in pairs(LSM3:HashTable(mediaType)) do
-        choices[name] = name
-    end
-    return choices
-end
-
 -- Doodads
 local _G = _G
 local ipairs = ipairs
+local pairs = pairs
 local select = select
 local tonumber = tonumber
 local tostring = tostring
@@ -85,117 +68,107 @@ do
     end
 end
 
--- WoW Forever uses the modern 12.1 UI engine but reports a 160xx interface
--- number and vanilla game content. WOW_PROJECT_ID is not a reliable flavor
--- discriminator for this client, so detect it the same way EllesmereUI does.
+-- WoW Forever runs vanilla content on the modern Retail UI engine and reports
+-- a 160xx interface number. WOW_PROJECT_ID can't tell it apart from Retail.
 local IsForever
 do
     local interfaceVersion = select(4, GetBuildInfo())
-    local is_forever = type(interfaceVersion) == "number"
-        and interfaceVersion >= 16000 and interfaceVersion < 20000
+    local is_forever = interfaceVersion >= 16000 and interfaceVersion < 20000
 
     IsForever = function()
         return is_forever
     end
 end
 
-local function IsRetailContent()
+-- Retail game content, as opposed to the Retail engine running Forever.
+local IsRetailContent = function()
     return IsRetail() and not IsForever()
 end
 
 -- WoW Functions
-local LegacyCollapseFactionHeader = CollapseFactionHeader
-local LegacyExpandFactionHeader = ExpandFactionHeader
+local CollapseFactionHeader = CollapseFactionHeader
+local ExpandFactionHeader = ExpandFactionHeader
 local GetContainerItemInfo = GetContainerItemInfo
 local GetCurrentCombatTextEventInfo = GetCurrentCombatTextEventInfo
 local GetGuildInfo = GetGuildInfo
 local GetInventoryItemID = GetInventoryItemID
 local GetItemInfo = GetItemInfo
-local LegacyGetNumFactions = GetNumFactions
-local LegacyGetFactionInfo = GetFactionInfo
-local LegacyGetFactionInfoByID = GetFactionInfoByID
+local GetNumFactions = GetNumFactions
+local GetFactionInfo = GetFactionInfo
+local GetFactionInfoByID = GetFactionInfoByID
 local GetMouseButtonClicked = GetMouseButtonClicked
-local LegacyGetWatchedFactionInfo = GetWatchedFactionInfo
+local GetWatchedFactionInfo = GetWatchedFactionInfo
 local GetXPExhaustion = GetXPExhaustion
 local IsControlKeyDown = IsControlKeyDown
 local IsResting = IsResting
 local IsShiftKeyDown = IsShiftKeyDown
-local LegacySetWatchedFactionIndex = SetWatchedFactionIndex
+local SetWatchedFactionIndex = SetWatchedFactionIndex
 local UnitLevel = UnitLevel
 local UnitXP = UnitXP
 local UnitXPMax = UnitXPMax
 
--- The 12.1 engine used by WoW Forever removed the old global reputation
--- functions. Keep the rest of XPBarNone on its original tuple-based API and
--- translate the modern C_Reputation tables at this boundary.
-local C_Rep = C_Reputation
+-- The modern engine (WoW Forever) removed the global reputation functions.
+-- Emulate the old ones on top of C_Reputation so we don't have to change the
+-- callers.
+if not GetFactionInfo then
+    local C_Reputation = C_Reputation
 
-local function FactionDataAsLegacyTuple(data)
-    if not data then return nil end
-    return data.name,
-           data.description,
-           data.reaction,
-           data.currentReactionThreshold,
-           data.nextReactionThreshold,
-           data.currentStanding,
-           data.atWarWith,
-           data.canToggleAtWar,
-           data.isHeader,
-           data.isCollapsed,
-           data.isHeaderWithRep,
-           data.isWatched,
-           data.isChild,
-           data.factionID,
-           data.hasBonusRepGain,
-           data.canBeLFGBonus
-end
+    -- Values in the order the old GetFactionInfo returned them.
+    local function UnpackFactionData(data)
+        if not data then
+            return nil
+        end
 
-local function GetNumFactions()
-    if LegacyGetNumFactions then return LegacyGetNumFactions() end
-    if C_Rep and C_Rep.GetNumFactions then return C_Rep.GetNumFactions() end
-    return 0
-end
-
-local function GetFactionInfo(index)
-    if LegacyGetFactionInfo then return LegacyGetFactionInfo(index) end
-    if C_Rep and C_Rep.GetFactionDataByIndex then
-        return FactionDataAsLegacyTuple(C_Rep.GetFactionDataByIndex(index))
+        return data.name,
+               data.description,
+               data.reaction,                 -- standingID
+               data.currentReactionThreshold, -- barMin
+               data.nextReactionThreshold,    -- barMax
+               data.currentStanding,          -- barValue
+               data.atWarWith,
+               data.canToggleAtWar,
+               data.isHeader,
+               data.isCollapsed,
+               data.isHeaderWithRep,          -- hasRep
+               data.isWatched,
+               data.isChild,
+               data.factionID,
+               data.hasBonusRepGain,
+               nil                            -- canBeLFGBonus
     end
-end
 
-local function GetFactionInfoByID(factionID)
-    if LegacyGetFactionInfoByID then return LegacyGetFactionInfoByID(factionID) end
-    if C_Rep and C_Rep.GetFactionDataByID then
-        return FactionDataAsLegacyTuple(C_Rep.GetFactionDataByID(factionID))
+    CollapseFactionHeader = C_Reputation.CollapseFactionHeader
+    ExpandFactionHeader = C_Reputation.ExpandFactionHeader
+    GetNumFactions = C_Reputation.GetNumFactions
+
+    GetFactionInfo = function(index)
+        return UnpackFactionData(C_Reputation.GetFactionDataByIndex(index))
     end
-end
 
-local function GetWatchedFactionInfo()
-    if LegacyGetWatchedFactionInfo then return LegacyGetWatchedFactionInfo() end
-    if C_Rep and C_Rep.GetWatchedFactionData then
-        local data = C_Rep.GetWatchedFactionData()
-        if data then
-            return data.name, data.reaction, data.currentReactionThreshold,
-                   data.nextReactionThreshold, data.currentStanding, data.factionID
+    GetFactionInfoByID = function(factionID)
+        return UnpackFactionData(C_Reputation.GetFactionDataByID(factionID))
+    end
+
+    GetWatchedFactionInfo = function()
+        local data = C_Reputation.GetWatchedFactionData()
+        if not data then
+            return nil
+        end
+
+        return data.name,
+               data.reaction,
+               data.currentReactionThreshold,
+               data.nextReactionThreshold,
+               data.currentStanding,
+               data.factionID
+    end
+
+    SetWatchedFactionIndex = function(index)
+        local data = C_Reputation.GetFactionDataByIndex(index)
+        if data and data.factionID then
+            C_Reputation.SetWatchedFactionByID(data.factionID)
         end
     end
-end
-
-local function SetWatchedFactionIndex(index)
-    if LegacySetWatchedFactionIndex then return LegacySetWatchedFactionIndex(index) end
-    if not (C_Rep and C_Rep.GetFactionDataByIndex and C_Rep.SetWatchedFactionByID) then return end
-    local data = C_Rep.GetFactionDataByIndex(index)
-    if data and data.factionID then C_Rep.SetWatchedFactionByID(data.factionID) end
-end
-
-local function CollapseFactionHeader(index)
-    if LegacyCollapseFactionHeader then return LegacyCollapseFactionHeader(index) end
-    if C_Rep and C_Rep.CollapseFactionHeader then return C_Rep.CollapseFactionHeader(index) end
-end
-
-local function ExpandFactionHeader(index)
-    if LegacyExpandFactionHeader then return LegacyExpandFactionHeader(index) end
-    if C_Rep and C_Rep.ExpandFactionHeader then return C_Rep.ExpandFactionHeader(index) end
 end
 
 -- Some functions don't exist outside of Retail. We set these conditionally
@@ -275,12 +248,9 @@ do
         end
     end
 
+    -- Checked first, MAX_PLAYER_LEVEL_TABLE doesn't exist on the modern engine.
     if IsForever() then
-        -- Prefer the engine's max-level helper so this survives future cap
-        -- changes; 60 is the vanilla-content fallback.
         GetMaxLevelForPlayerExpansion = _G.GetMaxLevelForPlayerExpansion
-            or _G.GetMaxPlayerLevel
-            or function() return 60 end
     elseif IsClassic() then
         local maxLevel = MAX_PLAYER_LEVEL_TABLE[LE_EXPANSION_CLASSIC]
 
@@ -336,12 +306,13 @@ do
                    repInfo.reactionThreshold,   -- friendThresh
                    repInfo.nextThreshold        -- friendThreshNext
         end
-    else
-        -- Unknown Classic-like flavors should still produce an XP bar rather
-        -- than failing during file load.
-        GetMaxLevelForPlayerExpansion = _G.GetMaxLevelForPlayerExpansion
-            or _G.GetMaxPlayerLevel
-            or function() return 60 end
+    end
+
+    -- Unknown flavours, don't fail during file load.
+    if not GetMaxLevelForPlayerExpansion then
+        GetMaxLevelForPlayerExpansion = function()
+            return 60
+        end
     end
 end
 
@@ -387,7 +358,16 @@ LSM3:Register("statusbar", "Smooth", "Interface\\AddOns\\XPBarNone\\Textures\\sm
 LSM3:Register("statusbar", "Smooth v2", "Interface\\AddOns\\XPBarNone\\Textures\\smoothv2")
 LSM3:Register("statusbar", "Striped", "Interface\\AddOns\\XPBarNone\\Textures\\striped")
 LSM3:Register("statusbar", "Waves", "Interface\\AddOns\\XPBarNone\\Textures\\waves")
-LSM3:Register("font", "Prototype", "Interface\\AddOns\\XPBarNone\\Fonts\\Prototype.ttf")
+
+-- Dropdown values for the texture and font options. We don't ship
+-- AceGUI-3.0-SharedMediaWidgets, so build plain AceConfig values from LSM.
+local function GetMediaChoices(mediaType)
+    local choices = {}
+    for name in pairs(LSM3:HashTable(mediaType)) do
+        choices[name] = name
+    end
+    return choices
+end
 
 -- SavedVariables stored here later
 local db
@@ -425,14 +405,14 @@ local defaults = {
             dynamicbars = false,
             mouseover = false,
             locked = false,
-            bubbles = true,
+            bubbles = false,
             clamptoscreen = true,
             commify = false,
             textposition = 50,
         },
         -- XP Bar specific
         xp = {
-            xpstring = "Level [pLVL]   XP=[curXP]/[maxXP]     Rest=[restXP]/[restPC]         [curPC] to lvl [nLVL]        [needXP] XP to Ding!",
+            xpstring = "Exp: [curXP]/[maxXP] ([restPC]) :: [curPC] through level [pLVL] :: [needXP] XP left :: [KTL] kills to level",
             indicaterest = true,
             showremaining = true,
             showzerorest = true,

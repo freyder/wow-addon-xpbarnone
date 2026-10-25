@@ -1,13 +1,2 @@
 Copyright 2026 Michael Malura
 https://malura.de
-
-WoW Forever compatibility port prepared by OpenAI Codex, with direction,
-assistance, and prompting by Rob Freyder.
-
-This derivative work is based on XPBarNone by phyber, as subsequently
-maintained by Michael Malura:
-https://github.com/maluramichael/wow-addon-xpbarnone
-
-The bundled Fonts/Prototype.ttf is by Justin Callaghan and is distributed
-under its own terms in Fonts/Prototype.txt. It is not covered by the Apache
-License that applies to XPBarNone.
