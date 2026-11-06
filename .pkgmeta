@@ -16,7 +16,7 @@ externals:
   libs/AceConfig-3.0: https://repos.curseforge.com/wow/ace3/trunk/AceConfig-3.0
   libs/AceLocale-3.0: https://repos.curseforge.com/wow/ace3/trunk/AceLocale-3.0
   libs/LibSharedMedia-3.0: https://repos.curseforge.com/wow/libsharedmedia-3-0/trunk/LibSharedMedia-3.0
-  libs/LibQTip-1.0: https://repos.wowace.com/wow/libqtip-1-0
+  libs/LibQTip-1.0: https://github.com/Torhal/LibQTip-1.0.git
 
 optional-dependencies:
   - masque

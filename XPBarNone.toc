@@ -3,7 +3,7 @@
 ## Author: phyber
 ## X-Updated-By: Michael Malura
 ## Notes: XP bar using Ace3. Updated for TBC and WoW Forever compatibility.
-## Version: 100002-3
+## Version: 100002-9
 ## X-Curse-Project-ID: 1448488
 ## IconTexture: Interface\Icons\XP_Icon
 ## Category-enUS: Quests & Leveling

@@ -1,6 +1,6 @@
 # XPBarNone
 
-## Unreleased
+## 100002-9 (2026-11-06)
 
 ### Added
 - WoW Forever support (interface 16001), contributed by Rob Freyder (@freyder)
