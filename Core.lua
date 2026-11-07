@@ -1596,6 +1596,7 @@ function XPBarNone:CreateXPBar()
     -- Movement starting
     self.frame.button:SetScript("OnDragStart", function()
         if not db.general.locked then
+            self.moving = true
             self.frame:StartMoving()
         end
     end)
@@ -1603,6 +1604,7 @@ function XPBarNone:CreateXPBar()
     -- Movement stopped
     self.frame.button:SetScript("OnDragStop", function()
         self.frame:StopMovingOrSizing()
+        self.moving = nil
         self:SavePosition()
     end)
 
@@ -1679,6 +1681,7 @@ function XPBarNone:CreateXPBar()
     self:ToggleClamp()
     self:ToggleBorder()
     self:RestorePosition()
+    self:WatchUIScale()
 
     -- Kill function after the bar is made.
     XPBarNone.CreateXPBar = nil
@@ -2281,4 +2284,26 @@ function XPBarNone:RestorePosition()
 
     self.frame:ClearAllPoints()
     self.frame:SetPoint("TOPLEFT", UIParent, "BOTTOMLEFT", x, y)
+end
+
+-- RestorePosition converts with the current scale, so restore again when it
+-- changes. UI addons like EllesmereUI set UIParent's scale after we're
+-- created, and UIParent:SetScale() fires no event, hence the hook.
+function XPBarNone:WatchUIScale()
+    if self.watchingUIScale then
+        return
+    end
+    self.watchingUIScale = true
+
+    local function Reposition()
+        if self.frame and not self.moving then
+            self:RestorePosition()
+        end
+    end
+
+    self:RegisterEvent("UI_SCALE_CHANGED", Reposition)
+    self:RegisterEvent("DISPLAY_SIZE_CHANGED", Reposition)
+    if hooksecurefunc then
+        hooksecurefunc(UIParent, "SetScale", Reposition)
+    end
 end
