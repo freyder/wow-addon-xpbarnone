@@ -1,5 +1,20 @@
 # XPBarNone
 
+## Unreleased
+
+### Fixed
+- Auto-watch reputation works without floating combat text for reputation,
+  and also finds factions under collapsed headers
+- [KTL] counts only kill XP, so quests and exploration no longer skew it
+- [KTL] uses the median of the last ten kills without rested bonus, accounts
+  for the rested pool, adapts when the mobs change, updates right after each
+  kill and keeps its history across /reload
+- [KTL] no longer counts existing XP as a kill after login, and shows "?"
+  instead of NaN before the first kill
+- Secret reputation values on WoW Forever no longer raise errors
+- The bar keeps its position when another addon changes the UI scale
+  (e.g. EllesmereUI)
+
 ## 100002-9 (2026-11-06)
 
 ### Added
