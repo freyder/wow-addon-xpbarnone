@@ -1007,11 +1007,20 @@ function XPBarNone:ToggleShowReputation()
 end
 
 -- Toggle auto watching
+-- Gains come from the reputation chat message, which every client sends.
+-- COMBAT_TEXT_UPDATE only reports them with floating combat text for
+-- reputation enabled. Both firing for one gain is harmless.
 function XPBarNone:ToggleAutoWatch()
     if db.rep.autowatchrep then
-        self:RegisterEvent("COMBAT_TEXT_UPDATE")
+        self:RegisterEvent("CHAT_MSG_COMBAT_FACTION_CHANGE")
+        if GetCurrentCombatTextEventInfo then
+            self:RegisterEvent("COMBAT_TEXT_UPDATE")
+        end
     else
-        self:UnregisterEvent("COMBAT_TEXT_UPDATE")
+        self:UnregisterEvent("CHAT_MSG_COMBAT_FACTION_CHANGE")
+        if GetCurrentCombatTextEventInfo then
+            self:UnregisterEvent("COMBAT_TEXT_UPDATE")
+        end
     end
 end
 
@@ -1103,10 +1112,8 @@ function XPBarNone:OnEnable()
     -- Rep Events
     self:RegisterEvent("UPDATE_FACTION", "UpdateXPBar")
 
-    -- Only register this one if we're auto watching rep.
-    if db.rep.autowatchrep then
-        self:RegisterEvent("COMBAT_TEXT_UPDATE")
-    end
+    -- Only register these if we're auto watching rep.
+    self:ToggleAutoWatch()
 
     -- Register some LSM3 callbacks
     LSM3.RegisterCallback(self, "LibSharedMedia_SetGlobal", function(callback, mtype, override)
@@ -1550,17 +1557,110 @@ function XPBarNone:MediaUpdate()
 
 end
 
+-- Patterns for the localized "reputation increased" chat strings, e.g.
+-- "Your %s reputation has increased by %d.", positional forms included.
+local REP_GAIN_PATTERNS = {}
+do
+    local function EscapePattern(text)
+        return (text:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0"))
+    end
+
+    local function FormatToPattern(fmt)
+        local pattern, pos, captures, factionCapture, amountCapture = "^", 1, 0, nil, nil
+
+        while true do
+            local s, e, spec = fmt:find("%%%d*%$?([%d%.]*[sdf])", pos)
+            if not s then
+                break
+            end
+
+            pattern = pattern .. EscapePattern(fmt:sub(pos, s - 1))
+
+            local kind = spec:sub(-1)
+            if kind == "s" then
+                pattern = pattern .. "(.-)"
+                captures = captures + 1
+                factionCapture = factionCapture or captures
+            elseif kind == "d" then
+                pattern = pattern .. "([%d,%.]+)"
+                captures = captures + 1
+                amountCapture = amountCapture or captures
+            else
+                -- Bonus percentages, not needed.
+                pattern = pattern .. "[%d,%.]+"
+            end
+
+            pos = e + 1
+        end
+
+        pattern = pattern .. EscapePattern(fmt:sub(pos)) .. "$"
+
+        return pattern, factionCapture, amountCapture
+    end
+
+    for _, name in ipairs({
+        "FACTION_STANDING_INCREASED",
+        "FACTION_STANDING_INCREASED_ACH_BONUS",
+        "FACTION_STANDING_INCREASED_BONUS",
+        "FACTION_STANDING_INCREASED_DOUBLE_BONUS",
+        "FACTION_STANDING_INCREASED_GENERIC",
+    }) do
+        local fmt = _G[name]
+        if type(fmt) == "string" and fmt ~= "" then
+            local pattern, factionCapture, amountCapture = FormatToPattern(fmt)
+            if factionCapture then
+                REP_GAIN_PATTERNS[#REP_GAIN_PATTERNS + 1] = {
+                    pattern = pattern,
+                    faction = factionCapture,
+                    amount = amountCapture,
+                }
+            end
+        end
+    end
+end
+
+-- Faction name and amount (if any) from a reputation gain message.
+local function ParseRepGainMessage(message)
+    if type(message) ~= "string" then
+        return nil
+    end
+
+    for _, entry in ipairs(REP_GAIN_PATTERNS) do
+        local captures = { message:match(entry.pattern) }
+        if captures[1] then
+            local amount = entry.amount and captures[entry.amount]
+            if amount then
+                amount = tonumber((amount:gsub(",", ""))) or amount
+            end
+            return captures[entry.faction], amount or 1
+        end
+    end
+
+    return nil
+end
+
 -- Check for faction updates for the auto rep watching
 function XPBarNone:COMBAT_TEXT_UPDATE(event, msgtype)
-    -- Abort if it's not a FACTION update
-    if msgtype ~= "FACTION" then
+    -- Abort if it's not a FACTION update, or if this client lacks the API.
+    if msgtype ~= "FACTION" or not GetCurrentCombatTextEventInfo then
         return
     end
 
-    local faction, amount = GetCurrentCombatTextEventInfo()
+    self:WatchFactionGain(GetCurrentCombatTextEventInfo())
+end
 
+function XPBarNone:CHAT_MSG_COMBAT_FACTION_CHANGE(event, message)
+    local faction, amount = ParseRepGainMessage(message)
+
+    if faction then
+        self:WatchFactionGain(faction, amount)
+    end
+end
+
+-- Watch a faction we just gained reputation with, if auto watching is on.
+function XPBarNone:WatchFactionGain(faction, amount)
     -- If we're watching reputations automatically
-    if db.rep.autowatchrep then
+    if db.rep.autowatchrep and faction then
         -- Don't track Horde / Alliance classic faction header
         if faction == FACTION_HORDE or faction == FACTION_ALLIANCE then
             return
