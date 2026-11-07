@@ -1726,10 +1726,19 @@ function XPBarNone:COMBAT_TEXT_UPDATE(event, msgtype)
 
     local faction, amount = GetCurrentCombatTextEventInfo()
 
+    -- The modern engine can return secret values, which we can't compare.
+    if issecretvalue and (issecretvalue(faction) or issecretvalue(amount)) then
+        return
+    end
+
     self:WatchFactionGain(faction, amount)
 end
 
 function XPBarNone:CHAT_MSG_COMBAT_FACTION_CHANGE(event, message)
+    if issecretvalue and issecretvalue(message) then
+        return
+    end
+
     local faction, amount = ParseRepGainMessage(message)
 
     if faction then
