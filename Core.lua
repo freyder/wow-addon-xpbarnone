@@ -10,6 +10,7 @@ local LQT = LibStub:GetLibrary("LibQTip-1.0")
 -- Doodads
 local _G = _G
 local ipairs = ipairs
+local next = next
 local pairs = pairs
 local select = select
 local tonumber = tonumber
@@ -1298,22 +1299,44 @@ do
 end
 
 -- Set the watched faction based on the faction name
+-- Collapsed headers hide their factions, so expand them while searching and
+-- collapse them again afterwards (bottom-up, so indices don't shift).
 local function SetWatchedFactionName(faction)
-    for i = 1, GetNumFactions() do
+    local expanded = {}
+    local i = 1
+
+    -- GetNumFactions() grows as headers are expanded, so re-check each pass.
+    while i <= GetNumFactions() do
         -- name, description, standingID, barMin, barMax, barValue, atWarWith,
         -- canToggleAtWar, isHeader, isCollapsed, hasRep, isWatched, isChild,
         -- factionID, hasBonusRepGain, canBeLFGBonus
         -- = GetFactionInfo(factionIndex);
-        local name,_,_,_,_,_,_,_,_,_,_,isWatched,_,_,_,_ = GetFactionInfo(i)
+        local name,_,_,_,_,_,_,_,isHeader,isCollapsed,_,isWatched = GetFactionInfo(i)
 
         if name == faction then
-            -- If it's not watched and it's not a header
-            -- watch it.
+            -- If it's not watched, watch it.
             if not isWatched then
                 SetWatchedFactionIndex(i)
             end
 
-            return
+            break
+        end
+
+        if isHeader and isCollapsed and name then
+            ExpandFactionHeader(i)
+            expanded[name] = true
+        end
+
+        i = i + 1
+    end
+
+    if next(expanded) then
+        for j = GetNumFactions(), 1, -1 do
+            local name,_,_,_,_,_,_,_,isHeader,isCollapsed = GetFactionInfo(j)
+
+            if isHeader and not isCollapsed and expanded[name] then
+                CollapseFactionHeader(j)
+            end
         end
     end
 end
