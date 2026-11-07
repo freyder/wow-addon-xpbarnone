@@ -1697,11 +1697,12 @@ end
 
 -- Update XP bar data
 function XPBarNone:UpdateXPData()
-    local prevXP = self.cXP or 0
+    -- nil after login or /reload, don't count the XP we already had as a kill.
+    local prevXP = self.cXP
     self.cXP = UnitXP("player")
     self.nXP = UnitXPMax("player")
     self.remXP = self.nXP - self.cXP
-    self.diffXP = self.cXP - prevXP
+    self.diffXP = prevXP and (self.cXP - prevXP) or 0
 
     if self.diffXP > 0 then
         lastXPValues[(sessionkills % 10) + 1] = self.diffXP
