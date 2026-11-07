@@ -19,7 +19,6 @@ local type = type
 -- Maths
 local math_ceil = math.ceil
 local math_floor = math.floor
-local math_huge = math.huge
 local math_min = math.min
 
 -- We need to know if we're in the Classic client at multiple points throughout
@@ -1174,13 +1173,12 @@ local function GetNumKTL()
         xp = xp + v
     end
 
-    local avgxp = xp / #lastXPValues
-    local ktl = remainingXP / avgxp
-
-    -- We can divide by zero if we're on a new character. Protect against breakage here.
-    if ktl == math_huge then
+    -- Nothing gained yet. 0 / 0 is NaN, not math.huge; 0 shows as "?".
+    if #lastXPValues == 0 or xp <= 0 then
         return 0
     end
+
+    local avgxp = xp / #lastXPValues
 
     return math_ceil(remainingXP / avgxp)
 end
