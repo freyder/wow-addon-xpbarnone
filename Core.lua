@@ -328,9 +328,115 @@ local RENOWN_LEVEL_LABEL = RENOWN_LEVEL_LABEL
 -- We need to know the HoA itemID sometimes
 local HEARTOFAZEROTH_ITEMID = 158075
 
--- Vars for averaging the kills to level
+-- Chat message parsing
+local function EscapePattern(text)
+    return (text:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0"))
+end
+
+-- Turns a localized format like "Your %s reputation has increased by %d."
+-- into an anchored pattern, plus the capture numbers of the first %s and %d.
+-- Positional forms ("%1$s") work, %f values are matched but not captured.
+local function FormatToPattern(fmt)
+    local pattern, pos, captures, stringCapture, numberCapture = "^", 1, 0, nil, nil
+
+    while true do
+        local s, e, spec = fmt:find("%%%d*%$?([%d%.]*[sdf])", pos)
+        if not s then
+            break
+        end
+
+        pattern = pattern .. EscapePattern(fmt:sub(pos, s - 1))
+
+        local kind = spec:sub(-1)
+        if kind == "s" then
+            pattern = pattern .. "(.-)"
+            captures = captures + 1
+            stringCapture = stringCapture or captures
+        elseif kind == "d" then
+            pattern = pattern .. "([%d,%.]+)"
+            captures = captures + 1
+            numberCapture = numberCapture or captures
+        else
+            pattern = pattern .. "[%d,%.]+"
+        end
+
+        pos = e + 1
+    end
+
+    pattern = pattern .. EscapePattern(fmt:sub(pos)) .. "$"
+
+    return pattern, stringCapture, numberCapture
+end
+
+-- Patterns for the named GlobalStrings that exist on this client.
+local function BuildMessagePatterns(names)
+    local patterns = {}
+
+    for _, name in ipairs(names) do
+        local fmt = _G[name]
+        if type(fmt) == "string" and fmt ~= "" then
+            local pattern, stringCapture, numberCapture = FormatToPattern(fmt)
+            if stringCapture then
+                patterns[#patterns + 1] = {
+                    pattern = pattern,
+                    string = stringCapture,
+                    number = numberCapture,
+                }
+            end
+        end
+    end
+
+    return patterns
+end
+
+-- String and number from the first matching pattern, or nil.
+local function ParseMessage(patterns, message)
+    if type(message) ~= "string" then
+        return nil
+    end
+
+    for _, entry in ipairs(patterns) do
+        local captures = { message:match(entry.pattern) }
+        if captures[1] then
+            local number = entry.number and captures[entry.number]
+            if number then
+                number = tonumber((number:gsub(",", ""))) or number
+            end
+            return captures[entry.string], number
+        end
+    end
+
+    return nil
+end
+
+-- "%s dies, you gain %d experience." and its group, raid and rested
+-- variants. Only kills send these, so quest and exploration XP is ignored.
+local KILL_XP_PATTERNS = BuildMessagePatterns({
+    "COMBATLOG_XPGAIN_FIRSTPERSON",
+    "COMBATLOG_XPGAIN_FIRSTPERSON_GROUP",
+    "COMBATLOG_XPGAIN_FIRSTPERSON_RAID",
+    "COMBATLOG_XPGAIN_EXHAUSTION1",
+    "COMBATLOG_XPGAIN_EXHAUSTION1_GROUP",
+    "COMBATLOG_XPGAIN_EXHAUSTION1_RAID",
+    "COMBATLOG_XPGAIN_EXHAUSTION2",
+    "COMBATLOG_XPGAIN_EXHAUSTION2_GROUP",
+    "COMBATLOG_XPGAIN_EXHAUSTION2_RAID",
+    "COMBATLOG_XPGAIN_EXHAUSTION4",
+    "COMBATLOG_XPGAIN_EXHAUSTION4_GROUP",
+    "COMBATLOG_XPGAIN_EXHAUSTION4_RAID",
+    "COMBATLOG_XPGAIN_EXHAUSTION5",
+    "COMBATLOG_XPGAIN_EXHAUSTION5_GROUP",
+    "COMBATLOG_XPGAIN_EXHAUSTION5_RAID",
+})
+
+-- Vars for averaging the kills to level (the last ten kills)
 local lastXPValues = {}
 local sessionkills = 0
+
+local function RecordKillXP(xp)
+    lastXPValues[(sessionkills % 10) + 1] = xp
+    sessionkills = sessionkills + 1
+end
 
 -- Rep hex colours
 -- Hex colours are automatically generated and cached on access.
@@ -1105,6 +1211,11 @@ function XPBarNone:OnEnable()
 
     -- XP Events
     self:RegisterEvent("PLAYER_XP_UPDATE", "UpdateXPData")
+
+    -- Kill XP for [KTL]; see KILL_XP_PATTERNS.
+    if #KILL_XP_PATTERNS > 0 then
+        self:RegisterEvent("CHAT_MSG_COMBAT_XP_GAIN")
+    end
     self:RegisterEvent("PLAYER_LEVEL_UP", "LevelUp")
     self:RegisterEvent("PLAYER_UPDATE_RESTING", "UpdateXPData")
     self:RegisterEvent("UPDATE_EXHAUSTION", "UpdateXPBar")
@@ -1578,86 +1689,32 @@ function XPBarNone:MediaUpdate()
 
 end
 
--- Patterns for the localized "reputation increased" chat strings, e.g.
--- "Your %s reputation has increased by %d.", positional forms included.
-local REP_GAIN_PATTERNS = {}
-do
-    local function EscapePattern(text)
-        return (text:gsub("[%^%$%(%)%%%.%[%]%*%+%-%?]", "%%%0"))
-    end
+-- Localized "reputation increased" chat strings, e.g.
+-- "Your %s reputation has increased by %d."
+local REP_GAIN_PATTERNS = BuildMessagePatterns({
+    "FACTION_STANDING_INCREASED",
+    "FACTION_STANDING_INCREASED_ACH_BONUS",
+    "FACTION_STANDING_INCREASED_BONUS",
+    "FACTION_STANDING_INCREASED_DOUBLE_BONUS",
+    "FACTION_STANDING_INCREASED_GENERIC",
+})
 
-    local function FormatToPattern(fmt)
-        local pattern, pos, captures, factionCapture, amountCapture = "^", 1, 0, nil, nil
+-- Faction name and amount (1 if none) from a reputation gain message.
+local function ParseRepGainMessage(message)
+    local faction, amount = ParseMessage(REP_GAIN_PATTERNS, message)
 
-        while true do
-            local s, e, spec = fmt:find("%%%d*%$?([%d%.]*[sdf])", pos)
-            if not s then
-                break
-            end
-
-            pattern = pattern .. EscapePattern(fmt:sub(pos, s - 1))
-
-            local kind = spec:sub(-1)
-            if kind == "s" then
-                pattern = pattern .. "(.-)"
-                captures = captures + 1
-                factionCapture = factionCapture or captures
-            elseif kind == "d" then
-                pattern = pattern .. "([%d,%.]+)"
-                captures = captures + 1
-                amountCapture = amountCapture or captures
-            else
-                -- Bonus percentages, not needed.
-                pattern = pattern .. "[%d,%.]+"
-            end
-
-            pos = e + 1
-        end
-
-        pattern = pattern .. EscapePattern(fmt:sub(pos)) .. "$"
-
-        return pattern, factionCapture, amountCapture
-    end
-
-    for _, name in ipairs({
-        "FACTION_STANDING_INCREASED",
-        "FACTION_STANDING_INCREASED_ACH_BONUS",
-        "FACTION_STANDING_INCREASED_BONUS",
-        "FACTION_STANDING_INCREASED_DOUBLE_BONUS",
-        "FACTION_STANDING_INCREASED_GENERIC",
-    }) do
-        local fmt = _G[name]
-        if type(fmt) == "string" and fmt ~= "" then
-            local pattern, factionCapture, amountCapture = FormatToPattern(fmt)
-            if factionCapture then
-                REP_GAIN_PATTERNS[#REP_GAIN_PATTERNS + 1] = {
-                    pattern = pattern,
-                    faction = factionCapture,
-                    amount = amountCapture,
-                }
-            end
-        end
+    if faction then
+        return faction, amount or 1
     end
 end
 
--- Faction name and amount (if any) from a reputation gain message.
-local function ParseRepGainMessage(message)
-    if type(message) ~= "string" then
-        return nil
-    end
+-- Record the XP of each kill for [KTL].
+function XPBarNone:CHAT_MSG_COMBAT_XP_GAIN(event, message)
+    local _, xp = ParseMessage(KILL_XP_PATTERNS, message)
 
-    for _, entry in ipairs(REP_GAIN_PATTERNS) do
-        local captures = { message:match(entry.pattern) }
-        if captures[1] then
-            local amount = entry.amount and captures[entry.amount]
-            if amount then
-                amount = tonumber((amount:gsub(",", ""))) or amount
-            end
-            return captures[entry.faction], amount or 1
-        end
+    if type(xp) == "number" and xp > 0 then
+        RecordKillXP(xp)
     end
-
-    return nil
 end
 
 -- Check for faction updates for the auto rep watching
@@ -1667,7 +1724,9 @@ function XPBarNone:COMBAT_TEXT_UPDATE(event, msgtype)
         return
     end
 
-    self:WatchFactionGain(GetCurrentCombatTextEventInfo())
+    local faction, amount = GetCurrentCombatTextEventInfo()
+
+    self:WatchFactionGain(faction, amount)
 end
 
 function XPBarNone:CHAT_MSG_COMBAT_FACTION_CHANGE(event, message)
@@ -1725,9 +1784,9 @@ function XPBarNone:UpdateXPData()
     self.remXP = self.nXP - self.cXP
     self.diffXP = prevXP and (self.cXP - prevXP) or 0
 
-    if self.diffXP > 0 then
-        lastXPValues[(sessionkills % 10) + 1] = self.diffXP
-        sessionkills = sessionkills + 1
+    -- Without the kill XP strings, count every XP gain as a kill.
+    if #KILL_XP_PATTERNS == 0 and self.diffXP > 0 then
+        RecordKillXP(self.diffXP)
     end
 
     self:UpdateXPBar()
