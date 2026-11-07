@@ -20,7 +20,12 @@ local type = type
 -- Maths
 local math_ceil = math.ceil
 local math_floor = math.floor
+local math_max = math.max
 local math_min = math.min
+
+-- Tables
+local table_remove = table.remove
+local table_sort = table.sort
 
 -- We need to know if we're in the Classic client at multiple points throughout
 -- the addon to decide which version of a function to use.
@@ -334,10 +339,12 @@ local function EscapePattern(text)
 end
 
 -- Turns a localized format like "Your %s reputation has increased by %d."
--- into an anchored pattern, plus the capture numbers of the first %s and %d.
--- Positional forms ("%1$s") work, %f values are matched but not captured.
+-- into an anchored pattern, plus the capture numbers of the first %s and %d
+-- and of the second %s. Positional forms ("%1$s") work, %f values are matched
+-- but not captured.
 local function FormatToPattern(fmt)
-    local pattern, pos, captures, stringCapture, numberCapture = "^", 1, 0, nil, nil
+    local pattern, pos, captures = "^", 1, 0
+    local stringCapture, numberCapture, secondStringCapture
 
     while true do
         local s, e, spec = fmt:find("%%%d*%$?([%d%.]*[sdf])", pos)
@@ -351,6 +358,9 @@ local function FormatToPattern(fmt)
         if kind == "s" then
             pattern = pattern .. "(.-)"
             captures = captures + 1
+            if stringCapture then
+                secondStringCapture = secondStringCapture or captures
+            end
             stringCapture = stringCapture or captures
         elseif kind == "d" then
             pattern = pattern .. "([%d,%.]+)"
@@ -365,7 +375,7 @@ local function FormatToPattern(fmt)
 
     pattern = pattern .. EscapePattern(fmt:sub(pos)) .. "$"
 
-    return pattern, stringCapture, numberCapture
+    return pattern, stringCapture, numberCapture, secondStringCapture
 end
 
 -- Patterns for the named GlobalStrings that exist on this client.
@@ -375,12 +385,14 @@ local function BuildMessagePatterns(names)
     for _, name in ipairs(names) do
         local fmt = _G[name]
         if type(fmt) == "string" and fmt ~= "" then
-            local pattern, stringCapture, numberCapture = FormatToPattern(fmt)
+            local pattern, stringCapture, numberCapture, secondStringCapture = FormatToPattern(fmt)
             if stringCapture then
                 patterns[#patterns + 1] = {
+                    name = name,
                     pattern = pattern,
                     string = stringCapture,
                     number = numberCapture,
+                    string2 = secondStringCapture,
                 }
             end
         end
@@ -429,13 +441,78 @@ local KILL_XP_PATTERNS = BuildMessagePatterns({
     "COMBATLOG_XPGAIN_EXHAUSTION5_RAID",
 })
 
--- Vars for averaging the kills to level (the last ten kills)
+-- In the rested variants ("(+150 exp Rested bonus)") the second %s is the
+-- bonus, which we take off to get the kill's base XP.
+for _, entry in ipairs(KILL_XP_PATTERNS) do
+    if entry.name:find("EXHAUSTION[12]") then
+        entry.bonus = entry.string2
+    end
+end
+
+-- Base XP of a kill message (rested bonus taken off), or nil.
+local function ParseKillMessage(message)
+    for _, entry in ipairs(KILL_XP_PATTERNS) do
+        local captures = { message:match(entry.pattern) }
+        if captures[1] then
+            local xp = tonumber((captures[entry.number]:gsub("%D", "")))
+            local bonus = entry.bonus and tonumber((captures[entry.bonus]:gsub("%D", "")))
+
+            if xp and bonus and bonus < xp then
+                xp = xp - bonus
+            end
+
+            return xp
+        end
+    end
+end
+
+-- Base XP of the last ten kills, oldest first, for [KTL]. Kept per
+-- character across /reload, see OnEnable.
+local KTL_KILLS = 10
 local lastXPValues = {}
-local sessionkills = 0
+
+local function Median(values, first, last)
+    local sorted = {}
+    for i = first, last do
+        sorted[#sorted + 1] = values[i]
+    end
+    table_sort(sorted)
+
+    local n = #sorted
+    if n % 2 == 1 then
+        return sorted[(n + 1) / 2]
+    end
+
+    return (sorted[n / 2] + sorted[n / 2 + 1]) / 2
+end
 
 local function RecordKillXP(xp)
-    lastXPValues[(sessionkills % 10) + 1] = xp
-    sessionkills = sessionkills + 1
+    lastXPValues[#lastXPValues + 1] = xp
+    if #lastXPValues > KTL_KILLS then
+        table_remove(lastXPValues, 1)
+    end
+
+    -- New area: if the last three kills are all over 50% above or below the
+    -- older ones, those no longer describe what we're killing. Drop them.
+    local n = #lastXPValues
+    if n > 3 then
+        local older = Median(lastXPValues, 1, n - 3)
+        local lower, higher = 0, 0
+
+        for i = n - 2, n do
+            if lastXPValues[i] < older * 0.5 then
+                lower = lower + 1
+            elseif lastXPValues[i] > older * 1.5 then
+                higher = higher + 1
+            end
+        end
+
+        if lower == 3 or higher == 3 then
+            for _ = 1, n - 3 do
+                table_remove(lastXPValues, 1)
+            end
+        end
+    end
 end
 
 -- Rep hex colours
@@ -1194,6 +1271,12 @@ function XPBarNone:OnInitialize()
 end
 
 function XPBarNone:OnEnable()
+    -- Keep [KTL]'s kill history across /reload and relog.
+    if self.db and self.db.char then
+        self.db.char.killXP = self.db.char.killXP or {}
+        lastXPValues = self.db.char.killXP
+    end
+
     -- Create the XP bar if it isn't created yet.
     if self.CreateXPBar then
         self:CreateXPBar()
@@ -1277,22 +1360,29 @@ local function IsPlayerMaxLevel(level)
 end
 
 -- Get the number of kills to level
+-- Kills needed: the median of recent kills ignores the odd elite or low
+-- mob. Rested kills give double XP until the rested pool runs out. Returns 0
+-- (shown as "?") before the first kill.
 local function GetNumKTL()
-    local remainingXP = XPBarNone.remXP
-    local xp = 0
-
-    for _, v in ipairs(lastXPValues) do
-        xp = xp + v
-    end
-
-    -- Nothing gained yet. 0 / 0 is NaN, not math.huge; 0 shows as "?".
-    if #lastXPValues == 0 or xp <= 0 then
+    if #lastXPValues == 0 then
         return 0
     end
 
-    local avgxp = xp / #lastXPValues
+    local perKill = Median(lastXPValues, 1, #lastXPValues)
+    if perKill <= 0 then
+        return 0
+    end
 
-    return math_ceil(remainingXP / avgxp)
+    local remainingXP = XPBarNone.remXP or 0
+    local needed = remainingXP
+
+    -- Without the kill messages the history already includes rested XP.
+    if #KILL_XP_PATTERNS > 0 then
+        local rested = GetXPExhaustion() or 0
+        needed = math_max(remainingXP - rested, remainingXP / 2)
+    end
+
+    return math_ceil(needed / perKill)
 end
 
 -- Get the XP bar text
@@ -1713,10 +1803,16 @@ end
 
 -- Record the XP of each kill for [KTL].
 function XPBarNone:CHAT_MSG_COMBAT_XP_GAIN(event, message)
-    local _, xp = ParseMessage(KILL_XP_PATTERNS, message)
+    if type(message) ~= "string" or (issecretvalue and issecretvalue(message)) then
+        return
+    end
 
-    if type(xp) == "number" and xp > 0 then
+    local xp = ParseKillMessage(message)
+
+    if xp and xp > 0 then
         RecordKillXP(xp)
+        -- PLAYER_XP_UPDATE may have redrawn the bar before this message.
+        self:UpdateXPBar()
     end
 end
 
